@@ -243,18 +243,27 @@ const PLATS_LIST = [
   'Gråuddsvassen','Västra Fågelö','Krymla Pottan','Östra Edanö','Bovik södra','Bovik norra',
   'Södra Fågelö','Borsösundet','Östra Hänö','Östra Fågelö','Edanö holmarna','Båtklubben grund',
   'Norra Fågelö','ABC pottan','krogskär','Gälön','Golfviken','Hornöudd','Brunskär','Myrholmen',
-  'Fifång norra','Björkholmen','Gullberga','Fridö','Kolvik'
+  'Fifång norra','Björkholmen','Gullberga','Fridö','Kolvik','Andeviken klubbgrund','Västra Fifång'
 ];
 
 // !!! Replace with your deployed Apps Script Web App URL !!!
 const DEFAULT_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxS2yFgcjepNdwh0xy_LLg0SDX_vJGG_fSMsoGMUfiMg58UDLCWEGzdTMoH87tqxT9sQw/exec';
 
 const STORAGE_KEY = 'pelagio_pending_catches_v1';
+const PLATSER_STORAGE_KEY = 'pelagio_pending_platser_v1';
 const SESSION_KEY = 'pelagio_session_v1';
 const CONFIG_KEY = 'pelagio_config_v1';
 
+// Direct link to the Google Sheet itself (not the Apps Script exec URL) — shown as a
+// plain "open the sheet" shortcut in ⚙ Settings.
+const GOOGLE_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1H57ZQdEoXSZSuZT8Mpin6waAGjw4ZA4CJ_wdXETjoPY/edit';
+
 // ---------- State ----------
 let catchLog = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+// New fishing spots proposed from the app — held here until the next Exportera,
+// same offline-first pattern as catchLog. Doesn't touch PLATS_LIST/the Plats-picker
+// dropdown at all; that still needs a manual app update to become selectable.
+let pendingPlatser = JSON.parse(localStorage.getItem(PLATSER_STORAGE_KEY) || '[]');
 // Merge onto defaultSession() (not ||) so a session saved before a new field existed
 // (e.g. vindriktning added later) gets backfilled instead of logging catches with it missing.
 let session = Object.assign(defaultSession(), JSON.parse(localStorage.getItem(SESSION_KEY) || 'null') || {});
@@ -298,6 +307,7 @@ function currentTime(){
 
 function saveAll(){
   localStorage.setItem(STORAGE_KEY, JSON.stringify(catchLog));
+  localStorage.setItem(PLATSER_STORAGE_KEY, JSON.stringify(pendingPlatser));
   localStorage.setItem(SESSION_KEY, JSON.stringify(session));
   localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
 }
@@ -393,7 +403,7 @@ function renderGrid(){
     });
   });
   document.getElementById('pendingCount').textContent = catchLog.length;
-  document.getElementById('btnExport').disabled = catchLog.length === 0;
+  document.getElementById('btnExport').disabled = (catchLog.length === 0 && pendingPlatser.length === 0);
 }
 
 document.getElementById('grid').addEventListener('click', (e)=>{
@@ -467,8 +477,26 @@ function openFiskarePicker(){
   });
 }
 
-document.getElementById('btnSettings').addEventListener('click', ()=>{
+function openSettings(){
   openOverlay(`
+    <h2>Inställningar</h2>
+
+    <a href="${GOOGLE_SHEET_URL}" target="_blank" rel="noopener"
+       class="btn btn-secondary" style="width:100%; text-decoration:none; margin-bottom:10px;">
+      📄 Öppna Google Sheet
+    </a>
+
+    <button class="btn btn-secondary" id="btnNewPlats" style="width:100%; margin-bottom:6px;">
+      📍 Lägg till ny plats
+    </button>
+    <p style="color:var(--muted);font-size:11.5px;margin:0 0 16px;">
+      ${pendingPlatser.length
+        ? `${pendingPlatser.length} plats${pendingPlatser.length===1?'':'er'} väntar på export.`
+        : 'Läggs till i Platser-fliken vid nästa export — blir inte valbar i Plats-listan förrän appen uppdateras separat.'}
+    </p>
+
+    <hr style="border-color:var(--border);margin:0 0 16px;">
+
     <h2>Export-inställningar</h2>
     <p style="color:var(--muted);font-size:12.5px;margin-top:-8px;">
       Plats, Drag, Fiskare, Vattentemp och Vindriktning väljs i fälten högst upp —
@@ -484,6 +512,7 @@ document.getElementById('btnSettings').addEventListener('click', ()=>{
     </div>
     <button class="btn btn-primary" id="fSave" style="width:100%;">Spara</button>
   `);
+  document.getElementById('btnNewPlats').addEventListener('click', openNewPlatsForm);
   document.getElementById('fSave').addEventListener('click', ()=>{
     const newUrl = document.getElementById('fUrl').value.trim();
     config.webAppUrl = newUrl;
@@ -495,7 +524,81 @@ document.getElementById('btnSettings').addEventListener('click', ()=>{
     saveAll();
     closeOverlay();
   });
-});
+}
+document.getElementById('btnSettings').addEventListener('click', openSettings);
+
+// New-plats proposal form. Deliberately minimal validation (just a required name) —
+// this gets filled in on a boat, not at a desk. Zon uses the same fixed vocabulary
+// already seen in the sheet (inomskärs/mellanskärs/ytterskärs) so entries stay
+// consistent instead of drifting into near-duplicate spellings over time.
+const ZON_LIST = ['inomskärs','mellanskärs','ytterskärs'];
+
+function openNewPlatsForm(){
+  openOverlay(`
+    <h2>Ny plats</h2>
+    <p style="color:var(--muted);font-size:12.5px;margin-top:-8px;">
+      Sparas på telefonen och skickas till Platser-fliken vid nästa export.
+      Bara namnet krävs — fyll i resten senare om du inte har det till hands nu.
+    </p>
+    <div class="field">
+      <label>Namn (Plats-ID) *</label>
+      <input type="text" id="npNamn" placeholder="t.ex. Kalles Grund">
+    </div>
+    <div class="field">
+      <label>Google coordinates</label>
+      <input type="text" id="npCoord" placeholder="58,8704299, 17,5717571">
+    </div>
+    <div class="field">
+      <label>Skärgårdszon</label>
+      <select id="npZon">
+        <option value="">— Ej valt —</option>
+        ${ZON_LIST.map(z=>`<option value="${z}">${z}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field">
+      <label>Djup (m)</label>
+      <input type="number" inputmode="decimal" min="0" step="0.1" id="npDjup" placeholder="t.ex. 4.5">
+    </div>
+    <div class="field">
+      <label>Bottentyp</label>
+      <input type="text" id="npBotten" placeholder="t.ex. mjuk/gräs/vass">
+    </div>
+    <div class="field">
+      <label>Notering</label>
+      <input type="text" id="npNotering" placeholder="valfritt">
+    </div>
+    <div id="npError" style="color:var(--bad); font-size:12.5px; margin:-8px 0 12px; display:none;">
+      Namn krävs.
+    </div>
+    <div class="row-actions">
+      <button class="btn btn-secondary" id="npBack">Avbryt</button>
+      <button class="btn btn-primary" id="npSave">Spara plats</button>
+    </div>
+  `);
+  document.getElementById('npBack').addEventListener('click', openSettings);
+  document.getElementById('npSave').addEventListener('click', ()=>{
+    const namn = document.getElementById('npNamn').value.trim();
+    if(!namn){
+      document.getElementById('npError').style.display = 'block';
+      return;
+    }
+    const djupRaw = document.getElementById('npDjup').value.trim();
+    const djup = djupRaw === '' ? null : Number(djupRaw);
+    pendingPlatser.push({
+      id: Date.now()+'-'+Math.random().toString(36).slice(2,7),
+      platsId: namn,
+      coordinates: document.getElementById('npCoord').value.trim() || null,
+      zon: document.getElementById('npZon').value || null,
+      djup: (djup===null || Number.isNaN(djup)) ? null : djup,
+      bottentyp: document.getElementById('npBotten').value.trim() || null,
+      notering: document.getElementById('npNotering').value.trim() || null,
+      ts: new Date().toISOString()
+    });
+    saveAll();
+    renderGrid(); // refreshes the Exportera button's disabled state, footer count etc.
+    openSettings();
+  });
+}
 
 document.getElementById('btnLog').addEventListener('click', ()=>{
   const items = [...catchLog].reverse().map(c=>`
@@ -602,13 +705,19 @@ document.getElementById('btnStats').addEventListener('click', openStatsView);
 // the whole session's pending log, so the actual send is gated behind an
 // explicit "Ja, exportera".
 document.getElementById('btnExport').addEventListener('click', ()=>{
-  if(catchLog.length===0) return;
+  if(catchLog.length===0 && pendingPlatser.length===0) return;
   const n = catchLog.length;
+  const p = pendingPlatser.length;
+  const parts = [];
+  if(n) parts.push(`${n} fångst${n===1?'':'er'}`);
+  if(p) parts.push(`${p} ny${p===1?'':'a'} plats${p===1?'':'er'}`);
   openOverlay(`
-    <h2>Exportera ${n} fångst${n===1?'':'er'}?</h2>
+    <h2>Exportera ${parts.join(' + ')}?</h2>
     <p style="color:var(--muted);font-size:13.5px;margin-top:-8px;">
       Skickar all ej exporterad data till Sheetet och rensar sedan sessionens
-      logg. Går inte att ångra.
+      logg. Går inte att ångra. <b style="color:var(--text);">Se till att du har
+      wifi/mobildata innan du trycker Ja</b> — utan anslutning misslyckas
+      exporten och du får försöka igen.
     </p>
     <div class="row-actions">
       <button class="btn btn-secondary" id="cancelExport">Avbryt</button>
@@ -633,26 +742,32 @@ async function performExport(){
     vindriktning: c.vindriktning, datum: c.datum, tid: c.tid,
     vikt: c.vikt, langd: c.langd
   }));
+  const platser = pendingPlatser.map(p=>({
+    platsId: p.platsId, coordinates: p.coordinates, zon: p.zon,
+    djup: p.djup, bottentyp: p.bottentyp, notering: p.notering
+  }));
 
   try{
     const res = await fetch(config.webAppUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ rows, secret: config.secret || '' })
+      body: JSON.stringify({ rows, platser, secret: config.secret || '' })
     });
     const data = await res.json();
     if(data.success){
       catchLog = [];
+      pendingPlatser = [];
       saveAll();
       renderGrid();
-      btn.textContent = `Klart! ${data.count} sparade ✓`;
+      const platserNote = data.platserAdded ? `, ${data.platserAdded} plats(er)` : '';
+      btn.textContent = `Klart! ${data.count} sparade${platserNote} ✓`;
     } else {
       btn.textContent = 'Fel: ' + (data.error || 'okänt');
     }
   } catch(err){
     btn.textContent = 'Ingen anslutning — försök igen senare';
   }
-  setTimeout(()=>{ btn.textContent='Exportera'; btn.disabled = catchLog.length===0; }, 2500);
+  setTimeout(()=>{ btn.textContent='Exportera'; btn.disabled = (catchLog.length===0 && pendingPlatser.length===0); }, 2500);
 }
 
 // ---------- Init ----------
