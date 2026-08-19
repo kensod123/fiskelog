@@ -773,6 +773,15 @@ async function performExport(){
 // ---------- Init ----------
 renderSessionBar();
 renderGrid();
+
+// Registered last and deliberately fire-and-forget: if this fails (unsupported
+// browser, file:// during local testing, etc.) the app still works exactly as
+// before, just without the offline-shell-loading benefit. See sw.js for why.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  });
+}
 </script>
 </body>
 </html>
