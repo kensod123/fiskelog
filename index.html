@@ -237,13 +237,19 @@ const DRAG_LIST = [
   'Dark Sleeper','T&C','Popper','Westin Salty','Skirted Jigg','Carolina-rigg',
   'Offset-jigg','Texas-rigg'
 ];
+// Static fallback only, used until the first successful live fetch (see
+// refreshPlatsList) and as the offline safety net after that. Not the source
+// of truth anymore — the live Platser sheet is. Keep this reasonably fresh
+// anyway so a brand new install still has a decent list before its first
+// network fetch, but don't stress about manually syncing it forever.
 const PLATS_LIST = [
   'Ospecificerad','Kilosviken','Stensund','Havsbadet','Båtklubben','Iköpottan','Kålfjörden',
   'Pålsundet','Västra Pålsundet','Östra Pålsundet','Granholmsbron','Västra Granholmen',
   'Gråuddsvassen','Västra Fågelö','Krymla Pottan','Östra Edanö','Bovik södra','Bovik norra',
   'Södra Fågelö','Borsösundet','Östra Hänö','Östra Fågelö','Edanö holmarna','Båtklubben grund',
   'Norra Fågelö','ABC pottan','krogskär','Gälön','Golfviken','Hornöudd','Brunskär','Myrholmen',
-  'Fifång norra','Björkholmen','Gullberga','Fridö','Kolvik','Andeviken klubbgrund','Västra Fifång'
+  'Fifång norra','Björkholmen','Gullberga','Fridö','Kolvik','Andeviken klubbgrund','Västra Fifång',
+  'Furskär'
 ];
 
 // !!! Replace with your deployed Apps Script Web App URL !!!
@@ -251,6 +257,7 @@ const DEFAULT_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxS2yFgcjep
 
 const STORAGE_KEY = 'pelagio_pending_catches_v1';
 const PLATSER_STORAGE_KEY = 'pelagio_pending_platser_v1';
+const PLATS_CACHE_KEY = 'pelagio_plats_cache_v1';
 const SESSION_KEY = 'pelagio_session_v1';
 const CONFIG_KEY = 'pelagio_config_v1';
 
@@ -261,9 +268,14 @@ const GOOGLE_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1H57ZQdEoXSZSuZ
 // ---------- State ----------
 let catchLog = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
 // New fishing spots proposed from the app — held here until the next Exportera,
-// same offline-first pattern as catchLog. Doesn't touch PLATS_LIST/the Plats-picker
-// dropdown at all; that still needs a manual app update to become selectable.
+// same offline-first pattern as catchLog.
 let pendingPlatser = JSON.parse(localStorage.getItem(PLATSER_STORAGE_KEY) || '[]');
+// The actual Plats-picker list. Starts from whatever was cached from the last
+// successful live fetch (see refreshPlatsList), or the static PLATS_LIST as a
+// fallback on a brand new install / while still offline. Kept as a separate
+// mutable variable (not a const) so a live fetch — or adding a plats via the
+// "Lägg till ny plats" form — can update it in place for the current session.
+let effectivePlatsList = JSON.parse(localStorage.getItem(PLATS_CACHE_KEY) || 'null') || PLATS_LIST;
 // Merge onto defaultSession() (not ||) so a session saved before a new field existed
 // (e.g. vindriktning added later) gets backfilled instead of logging catches with it missing.
 let session = Object.assign(defaultSession(), JSON.parse(localStorage.getItem(SESSION_KEY) || 'null') || {});
@@ -283,7 +295,7 @@ function defaultSession(){
     fiskare: FISKARE_LIST[0],
     vattentemp: VATTENTEMP_LIST[2],
     vindriktning: VINDRIKTNING_LIST[0],
-    plats: PLATS_LIST[0],
+    plats: effectivePlatsList[0], // 'Ospecificerad' as long as it stays first in the Platser sheet
     drag: DRAG_LIST[0]
   };
 }
@@ -329,8 +341,11 @@ function countFor(art, storlek){
 // Each stays set until changed, and applies to every catch logged after that.
 // Fiskare sits between these two groups but renders as a photo-picker instead of a
 // plain <select> (see fiskareChipHTML/openFiskarePicker), so it's kept out of this list.
+// 'plats' has no static list here on purpose — selectChipsHTML resolves it from
+// effectivePlatsList at render time instead, since that list can change at runtime
+// (live fetch, or adding a spot via "Lägg till ny plats").
 const SESSION_FIELDS_LEFT = [
-  { key: 'plats', label: 'Plats', list: PLATS_LIST },
+  { key: 'plats', label: 'Plats' },
   { key: 'drag',  label: 'Drag',  list: DRAG_LIST }
 ];
 const SESSION_FIELDS_RIGHT = [
@@ -339,14 +354,17 @@ const SESSION_FIELDS_RIGHT = [
 ];
 
 function selectChipsHTML(fields){
-  return fields.map(f => `
+  return fields.map(f => {
+    const list = f.key === 'plats' ? effectivePlatsList : f.list;
+    return `
     <div class="chip chip-select">
       <b>${f.label}</b>
       <select data-key="${f.key}">
-        ${f.list.map(v=>`<option value="${v}" ${v===session[f.key]?'selected':''}>${v}</option>`).join('')}
+        ${list.map(v=>`<option value="${v}" ${v===session[f.key]?'selected':''}>${v}</option>`).join('')}
       </select>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 function fiskareChipHTML(){
@@ -491,8 +509,8 @@ function openSettings(){
     </button>
     <p style="color:var(--muted);font-size:11.5px;margin:0 0 16px;">
       ${pendingPlatser.length
-        ? `${pendingPlatser.length} plats${pendingPlatser.length===1?'':'er'} väntar på export.`
-        : 'Läggs till i Platser-fliken vid nästa export — blir inte valbar i Plats-listan förrän appen uppdateras separat.'}
+        ? `${pendingPlatser.length} plats${pendingPlatser.length===1?'':'er'} väntar på export. Redan valbar i Plats-listan här på din telefon — övriga får den nästa gång deras app synkar med nätverk.`
+        : 'Läggs till i Platser-fliken vid nästa export, och blir direkt valbar i Plats-listan här på din telefon. Övriga i gruppen får den automatiskt nästa gång deras app har nätverk.'}
     </p>
 
     <hr style="border-color:var(--border);margin:0 0 16px;">
@@ -594,8 +612,16 @@ function openNewPlatsForm(){
       notering: document.getElementById('npNotering').value.trim() || null,
       ts: new Date().toISOString()
     });
+    // Make it selectable immediately on THIS phone, not just after the next
+    // export + everyone else's live sync — you already know the name, no
+    // reason to wait. Doesn't touch the pending-export queue above.
+    if(!effectivePlatsList.includes(namn)){
+      effectivePlatsList = [...effectivePlatsList, namn];
+      localStorage.setItem(PLATS_CACHE_KEY, JSON.stringify(effectivePlatsList));
+    }
     saveAll();
-    renderGrid(); // refreshes the Exportera button's disabled state, footer count etc.
+    renderGrid();       // refreshes the Exportera button's disabled state, footer count etc.
+    renderSessionBar(); // so the Plats dropdown offers the new name right away
     openSettings();
   });
 }
@@ -770,9 +796,36 @@ async function performExport(){
   setTimeout(()=>{ btn.textContent='Exportera'; btn.disabled = (catchLog.length===0 && pendingPlatser.length===0); }, 2500);
 }
 
+// ---------- Live Plats sync ----------
+// Fire-and-forget query against the same Apps Script URL used for export.
+// Deliberately a POST with an {action:'getPlatser'} marker, not a true GET —
+// testing showed a real GET's response gets CORS-blocked when read via fetch()
+// from a cross-origin page like this one, while POST responses don't have
+// that problem. So this reuses the exact request shape already proven to work
+// for export. Silently keeps using the cached/fallback list on any failure —
+// offline, misconfigured URL, whatever — never blocks the app on this.
+async function refreshPlatsList(){
+  try{
+    const res = await fetch(config.webAppUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'getPlatser', secret: config.secret || '' })
+    });
+    const data = await res.json();
+    if(data.success && Array.isArray(data.platser) && data.platser.length){
+      effectivePlatsList = data.platser;
+      localStorage.setItem(PLATS_CACHE_KEY, JSON.stringify(effectivePlatsList));
+      renderSessionBar(); // re-render so an already-open Plats dropdown picks up the fresh list
+    }
+  }catch(err){
+    // offline, or Apps Script not reachable — fine, keep what we already have
+  }
+}
+
 // ---------- Init ----------
 renderSessionBar();
 renderGrid();
+refreshPlatsList();
 
 // Registered last and deliberately fire-and-forget: if this fails (unsupported
 // browser, file:// during local testing, etc.) the app still works exactly as

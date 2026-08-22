@@ -37,10 +37,16 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Only GET requests to our own scope get the cache treatment. Critically,
-  // this leaves the POST export call to Apps Script completely untouched —
-  // it always goes straight to the network, exactly as before.
+  // Only GET requests to our own scope get the cache treatment. This is
+  // load-bearing, not just a comment: without the scope check, this handler
+  // would also catch the cross-origin calls to Apps Script (the export POST,
+  // and the live Plats-list GET) since a service worker's fetch event fires
+  // for every request a controlled page makes, not just same-origin ones.
+  // The method check alone protects the POST; the URL check below is what
+  // protects the GET — without it, the Plats list could get served stale
+  // from cache instead of always hitting the network when online.
   if (event.request.method !== 'GET') return;
+  if (!event.request.url.startsWith(self.registration.scope)) return;
 
   event.respondWith(
     caches.match(event.request).then((cached) => {
