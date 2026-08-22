@@ -229,6 +229,25 @@ const FISKARE_PHOTOS = {
 };
 const MANAD_LIST = ['Januari','Februari','Mars','April','Maj','Juni','Juli','Augusti','September','Oktober','November','December'];
 const VATTENTEMP_LIST = ['< 5°C','5 – 10°C','10 – 15°C','15 – 18°C','18 – 20°C','20 – 22°C','> 22°C'];
+// Absolute pressure, 3 hPa brackets spanning 980–1030 plus catch-all extremes
+// on both ends, PLUS an explicit 'Ospecificerad' first option for whenever
+// nobody bothers checking the exact number — cheap to have logged when it
+// IS captured, no cost when it isn't. Same session-constant dropdown pattern
+// as Vattentemp.
+const LUFTTRYCK_LIST = [
+  'Ospecificerad',
+  '< 980 hPa',
+  '980 – 982 hPa','983 – 985 hPa','986 – 988 hPa','989 – 991 hPa','992 – 994 hPa',
+  '995 – 997 hPa','998 – 1000 hPa','1001 – 1003 hPa','1004 – 1006 hPa','1007 – 1009 hPa',
+  '1010 – 1012 hPa','1013 – 1015 hPa','1016 – 1018 hPa','1019 – 1021 hPa','1022 – 1024 hPa',
+  '1025 – 1027 hPa','1028 – 1030 hPa',
+  '> 1030 hPa'
+];
+// Trend matters as much as (some say more than) the absolute reading for
+// fishing folklore — falling pressure vs. rising vs. holding steady. Separate
+// dropdown rather than folding into LUFTTRYCK_LIST since they're independent
+// pieces of information you'd read off a barometer/weather app together.
+const LUFTTRYCKSTREND_LIST = ['Ospecificerat','Fallande','Stabilt','Stigande'];
 const VINDRIKTNING_LIST = [
   'Ospecificerad','Nord','Nordost','Öst','Sydost','Syd','Sydvästlig','Väst','Nordväst'
 ];
@@ -295,6 +314,8 @@ function defaultSession(){
     fiskare: FISKARE_LIST[0],
     vattentemp: VATTENTEMP_LIST[2],
     vindriktning: VINDRIKTNING_LIST[0],
+    lufttryck: LUFTTRYCK_LIST[0], // 'Ospecificerad'
+    lufttryckstrend: LUFTTRYCKSTREND_LIST[0], // 'Ospecificerat'
     plats: effectivePlatsList[0], // 'Ospecificerad' as long as it stays first in the Platser sheet
     drag: DRAG_LIST[0]
   };
@@ -350,7 +371,9 @@ const SESSION_FIELDS_LEFT = [
 ];
 const SESSION_FIELDS_RIGHT = [
   { key: 'vattentemp',   label: 'Vattentemp',   list: VATTENTEMP_LIST },
-  { key: 'vindriktning', label: 'Vindriktning', list: VINDRIKTNING_LIST }
+  { key: 'vindriktning', label: 'Vindriktning', list: VINDRIKTNING_LIST },
+  { key: 'lufttryck',       label: 'Lufttryck', list: LUFTTRYCK_LIST },
+  { key: 'lufttryckstrend', label: 'Trend',     list: LUFTTRYCKSTREND_LIST }
 ];
 
 function selectChipsHTML(fields){
@@ -436,6 +459,8 @@ document.getElementById('grid').addEventListener('click', (e)=>{
       manad: currentManad(),
       vattentemp: session.vattentemp,
       vindriktning: session.vindriktning,
+      lufttryck: session.lufttryck,
+      lufttryckstrend: session.lufttryckstrend,
       plats: session.plats,
       drag: session.drag,
       vikt: null,  // gram — ifylls senare i sessionsvyn när fisken faktiskt vägs
@@ -517,7 +542,7 @@ function openSettings(){
 
     <h2>Export-inställningar</h2>
     <p style="color:var(--muted);font-size:12.5px;margin-top:-8px;">
-      Plats, Drag, Fiskare, Vattentemp och Vindriktning väljs i fälten högst upp —
+      Plats, Drag, Fiskare, Vattentemp, Vindriktning, Lufttryck och Trend väljs i fälten högst upp —
       Datum fylls i automatiskt och kan inte ändras.
     </p>
     <div class="field">
@@ -765,7 +790,7 @@ async function performExport(){
   const rows = catchLog.map(c=>({
     manad: c.manad, fiskare: c.fiskare, art: c.art, storlek: c.storlek,
     vattentemp: c.vattentemp, plats: c.plats, drag: c.drag,
-    vindriktning: c.vindriktning, datum: c.datum, tid: c.tid,
+    vindriktning: c.vindriktning, lufttryck: c.lufttryck, lufttryckstrend: c.lufttryckstrend, datum: c.datum, tid: c.tid,
     vikt: c.vikt, langd: c.langd
   }));
   const platser = pendingPlatser.map(p=>({
