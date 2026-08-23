@@ -176,6 +176,12 @@
   }
   .measure-cell.unset{color:var(--muted); font-weight:600; text-decoration:none;}
 
+  .cell-select{
+    background:none; border:none; color:var(--text); font-size:12px; font-weight:600;
+    padding:2px 14px 2px 0; font-family:inherit; max-width:110px;
+  }
+  .cell-select:focus{outline:none;}
+
   .status{font-size:12px; text-align:center; padding:6px; color:var(--muted);}
   .status.ok{color:var(--good);}
   .status.err{color:var(--bad);}
@@ -674,15 +680,31 @@ document.getElementById('btnLog').addEventListener('click', ()=>{
 });
 
 // ---------- Session stats ----------
+// Builds a compact <select> for one editable table cell — used so a misclick
+// (wrong species tapped, forgot to switch Plats/Drag/Fiskare/Vind before
+// continuing to log) can be fixed right there in the list instead of having
+// to delete the catch and log it again.
+function cellSelectHTML(list, id, field, current){
+  const opts = list.map(v=>`<option value="${v}" ${v===current?'selected':''}>${v}</option>`).join('');
+  return `<select class="cell-select" data-id="${id}" data-field="${field}">${opts}</select>`;
+}
+
 function openStatsView(){
   const rows = [...catchLog].reverse().map(c=>`
     <tr>
-      <td>${c.art}</td><td>${c.storlek}</td><td>${c.fiskare}</td><td>${c.plats}</td>
-      <td>${c.drag}</td><td>${c.vindriktning}</td><td>${c.datum}</td><td>${c.tid||'–'}</td>
+      <td>${cellSelectHTML(SPECIES.map(s=>s.art), c.id, 'art', c.art)}</td>
+      <td>${cellSelectHTML(SIZES, c.id, 'storlek', c.storlek)}</td>
+      <td>${cellSelectHTML(FISKARE_LIST, c.id, 'fiskare', c.fiskare)}</td>
+      <td>${cellSelectHTML(effectivePlatsList, c.id, 'plats', c.plats)}</td>
+      <td>${cellSelectHTML(DRAG_LIST, c.id, 'drag', c.drag)}</td>
+      <td>${cellSelectHTML(VINDRIKTNING_LIST, c.id, 'vindriktning', c.vindriktning)}</td>
+      <td>${cellSelectHTML(LUFTTRYCK_LIST, c.id, 'lufttryck', c.lufttryck)}</td>
+      <td>${cellSelectHTML(LUFTTRYCKSTREND_LIST, c.id, 'lufttryckstrend', c.lufttryckstrend)}</td>
+      <td>${c.datum}</td><td>${c.tid||'–'}</td>
       <td><button class="measure-cell ${c.vikt==null?'unset':''}" data-id="${c.id}">${c.vikt!=null ? c.vikt+' g' : '–'}</button></td>
       <td><button class="measure-cell ${c.langd==null?'unset':''}" data-id="${c.id}">${c.langd!=null ? c.langd+' cm' : '–'}</button></td>
     </tr>
-  `).join('') || `<tr><td colspan="10" style="text-align:center;color:var(--muted);">Inga fångster ännu</td></tr>`;
+  `).join('') || `<tr><td colspan="12" style="text-align:center;color:var(--muted);">Inga fångster ännu</td></tr>`;
 
   const liten = catchLog.filter(c=>c.storlek==='Liten').length;
   const mellan = catchLog.filter(c=>c.storlek==='Mellan').length;
@@ -693,13 +715,15 @@ function openStatsView(){
     <div class="stats-table-wrap">
       <table class="stats-table">
         <thead><tr>
-          <th>Art</th><th>Storlek</th><th>Fiskare</th><th>Plats</th><th>Drag</th><th>Vind</th><th>Datum</th><th>Tid</th><th>Vikt</th><th>Längd</th>
+          <th>Art</th><th>Storlek</th><th>Fiskare</th><th>Plats</th><th>Drag</th><th>Vind</th><th>Tryck</th><th>Trend</th><th>Datum</th><th>Tid</th><th>Vikt</th><th>Längd</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
     <p style="color:var(--muted);font-size:11px;margin:10px 2px 0;">
       Tryck på Vikt/Längd för att fylla i efter vägning/mätning — valfritt om ni bara gjort ett av de två.
+      Art/Storlek/Fiskare/Plats/Drag/Vind går att ändra direkt i listan om något
+      loggades fel eller glömdes byta.
     </p>
     <div class="stats-summary">
       <div class="stats-chip"><b>${catchLog.length}</b>Totalt</div>
@@ -710,6 +734,20 @@ function openStatsView(){
   `);
   sheet.querySelectorAll('.measure-cell').forEach(btn=>{
     btn.addEventListener('click', ()=> openMeasureForm(btn.dataset.id));
+  });
+  // Correcting a misclick (wrong species tapped, forgot to switch a session
+  // field) — updates just that one logged catch, doesn't touch the current
+  // top-bar session state or any other row.
+  sheet.querySelectorAll('.cell-select').forEach(sel=>{
+    sel.addEventListener('change', ()=>{
+      const c = catchLog.find(x=>x.id===sel.dataset.id);
+      if(!c) return;
+      c[sel.dataset.field] = sel.value;
+      saveAll();
+      // Re-render so the Liten/Mellan/Stor summary chips stay correct after
+      // an Art/Storlek correction (they're computed fresh on each render).
+      openStatsView();
+    });
   });
 }
 
