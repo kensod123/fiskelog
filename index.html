@@ -560,8 +560,23 @@ function openSettings(){
       <input type="text" id="fSecret" value="${config.secret||''}">
     </div>
     <button class="btn btn-primary" id="fSave" style="width:100%;">Spara</button>
+
+    <hr style="border-color:var(--border);margin:16px 0;">
+
+    <h2>Felsökning</h2>
+    <p style="color:var(--muted);font-size:12.5px;margin-top:-8px;">
+      Visar appen inte senaste uppdateringen efter att den byggts om (nya
+      fält, ändringar) — testa detta. Rör ALDRIG loggade fångster,
+      väntande platser eller inställningar, bara appens egen kod hämtas om.
+      Kräver nät för att funka — gör det inte om du är offline just nu,
+      det kan göra att appen inte går att öppna förrän du har täckning igen.
+    </p>
+    <button class="btn btn-secondary" id="btnClearCache" style="width:100%;">
+      🔄 Rensa app-cache &amp; ladda om
+    </button>
   `);
   document.getElementById('btnNewPlats').addEventListener('click', openNewPlatsForm);
+  document.getElementById('btnClearCache').addEventListener('click', confirmClearAppCache);
   document.getElementById('fSave').addEventListener('click', ()=>{
     const newUrl = document.getElementById('fUrl').value.trim();
     config.webAppUrl = newUrl;
@@ -575,6 +590,67 @@ function openSettings(){
   });
 }
 document.getElementById('btnSettings').addEventListener('click', openSettings);
+
+// Clears only the service worker's Cache Storage (the app's own code files —
+// index.html, manifest, icons) so a stale installed copy re-fetches the
+// latest deploy. Deliberately never touches localStorage — catchLog,
+// pendingPlatser, effectivePlatsList, session and config all live there and
+// are completely untouched by this, so an unexported fishing session or a
+// just-added-but-not-yet-exported plats survives a cache clear just fine.
+function confirmClearAppCache(){
+  if(!navigator.onLine){
+    openOverlay(`
+      <h2>Ingen nätanslutning</h2>
+      <p style="color:var(--muted);font-size:13.5px;margin-top:-8px;">
+        Rensar du cachen nu, utan nät, kan appen sluta gå att öppna tills du
+        har täckning igen — det finns då ingen lokal kopia kvar att visa.
+        Vänta tills du har wifi/mobildata.
+      </p>
+      <div class="row-actions">
+        <button class="btn btn-primary" id="ccBack" style="width:100%;">Tillbaka</button>
+      </div>
+    `);
+    document.getElementById('ccBack').addEventListener('click', openSettings);
+    return;
+  }
+  openOverlay(`
+    <h2>Rensa app-cache?</h2>
+    <p style="color:var(--muted);font-size:13.5px;margin-top:-8px;">
+      Dina loggade fångster, väntande platser och inställningar påverkas
+      inte — bara appens egna filer rensas och hämtas färska. Så här går det till:
+    </p>
+    <ol style="color:var(--text);font-size:13.5px;margin:0 0 14px;padding-left:20px;line-height:1.6;">
+      <li>Tryck "Ja, rensa &amp; ladda om" nedan.</li>
+      <li>Skärmen blinkar till och laddar om sig själv — helt automatiskt,
+        rör inget mer under tiden.</li>
+      <li>En liten "✅ Uppdaterat"-ruta dyker upp när det är klart — då har
+        appen den senaste versionen och du kan fortsätta logga direkt.</li>
+    </ol>
+    <div class="row-actions">
+      <button class="btn btn-secondary" id="ccCancel">Avbryt</button>
+      <button class="btn btn-primary" id="ccConfirm">Ja, rensa &amp; ladda om</button>
+    </div>
+  `);
+  document.getElementById('ccCancel').addEventListener('click', openSettings);
+  document.getElementById('ccConfirm').addEventListener('click', clearAppCache);
+}
+
+async function clearAppCache(){
+  try{
+    if('caches' in window){
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k=>caches.delete(k)));
+    }
+    if('serviceWorker' in navigator){
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r=>r.unregister()));
+    }
+  } catch(e){ /* best-effort — reload anyway, worst case the old cache just stays */ }
+  // sessionStorage (not localStorage) so this survives exactly the one reload
+  // it's meant for, then disappears on its own — no separate "clear" step needed.
+  sessionStorage.setItem('pelagio_cache_just_cleared', '1');
+  location.reload();
+}
 
 // New-plats proposal form. Deliberately minimal validation (just a required name) —
 // this gets filled in on a boat, not at a desk. Zon uses the same fixed vocabulary
@@ -889,6 +965,24 @@ async function refreshPlatsList(){
 renderSessionBar();
 renderGrid();
 refreshPlatsList();
+
+// Confirms the "Rensa app-cache" flow (⚙ → Felsökning) actually landed a
+// fresh copy — the flag is set right before reload and only survives this
+// one load, so it can't pop up again on a normal app open.
+if(sessionStorage.getItem('pelagio_cache_just_cleared')){
+  sessionStorage.removeItem('pelagio_cache_just_cleared');
+  openOverlay(`
+    <h2>✅ Uppdaterat</h2>
+    <p style="color:var(--muted);font-size:13.5px;margin-top:-8px;">
+      Appen har hämtat den senaste versionen. Dina loggade fångster och
+      inställningar finns kvar precis som innan.
+    </p>
+    <div class="row-actions">
+      <button class="btn btn-primary" id="cuOk" style="width:100%;">Ok</button>
+    </div>
+  `);
+  document.getElementById('cuOk').addEventListener('click', closeOverlay);
+}
 
 // Registered last and deliberately fire-and-forget: if this fails (unsupported
 // browser, file:// during local testing, etc.) the app still works exactly as
