@@ -257,10 +257,13 @@ const LUFTTRYCKSTREND_LIST = ['Ospecificerat','Fallande','Stabilt','Stigande'];
 const VINDRIKTNING_LIST = [
   'Ospecificerad','Nord','Nordost','Öst','Sydost','Syd','Sydvästlig','Väst','Nordväst'
 ];
+// Konsoliderad 2026-08-27 (se Dokumentation §24): Westin Salty -> Sked,
+// Skirted Jigg blev kvar för sig, Carolina-rigg/Texas-rigg -> T&C,
+// Offset-jigg -> Jigg. Historiska Fångstlogg-rader med de gamla namnen
+// omdöpta i samma veva, så inget syns som "Fel värde" i datakvaliteten.
 const DRAG_LIST = [
   'Chatterbait','Jigg','Ned','Drop-shot','Jerk','Vibrationsbete','Sked','Free-rig',
-  'Dark Sleeper','T&C','Popper','Westin Salty','Skirted Jigg','Carolina-rigg',
-  'Offset-jigg','Texas-rigg'
+  'Dark Sleeper','T&C','Popper','Skirted Jigg'
 ];
 // Static fallback only, used until the first successful live fetch (see
 // refreshPlatsList) and as the offline safety net after that. Not the source
