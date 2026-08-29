@@ -966,6 +966,28 @@ function toPostgresPlats(p){
 // "server rejected this data" (a real signal: a FK/CHECK constraint failed,
 // meaning this app's value lists and the fishing schema's reference data
 // have drifted apart — see Homelab's README.md "Fishing data" section).
+// TEMPORARY DEBUG (added 2026-08-29 at Homelab's request): a real phone
+// write isn't landing in Postgres despite the server chain (HTTPS + Caddy +
+// PostgREST) verified working via curl with the exact same payload —
+// console.warn is invisible with no devtools attached to a real device, so
+// this puts the actual error on screen instead. REMOVE once the root cause
+// is found; not meant to stay long-term.
+function showPgDebug(msg){
+  let el = document.getElementById('pgDebugBanner');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'pgDebugBanner';
+    el.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:99999;'
+      + 'background:#3a0d0d;color:#ffd9d9;border:1px solid #ff6b6b;border-radius:8px;'
+      + 'padding:10px 12px;font:12px/1.4 monospace;white-space:pre-wrap;'
+      + 'max-height:40vh;overflow:auto;box-shadow:0 4px 16px rgba(0,0,0,.4);';
+    el.addEventListener('click', () => el.remove());
+    document.body.appendChild(el);
+  }
+  const time = new Date().toLocaleTimeString('sv-SE');
+  el.textContent = '🔧 DEBUG (tillfälligt) [' + time + ']\n' + msg + '\n\n(tryck för att stänga)';
+}
+
 async function postgresWrite(path, rowsArr){
   if(!rowsArr.length) return;
   try{
@@ -986,12 +1008,15 @@ async function postgresWrite(path, rowsArr){
     if(!res.ok){
       const body = await res.text().catch(()=>'');
       console.warn('[Postgres dual-write] ' + path + ' rejected (' + res.status + '): ' + body);
+      showPgDebug('AVVISAD: ' + path + '\nStatus: ' + res.status + '\nSvar: ' + (body || '(tomt)'));
     }
   } catch(err){
     // Unreachable — offline, phone not on the tailnet yet, server down.
     // Expected during the beta rollout; the Sheet export is still the
-    // system of record, so there's nothing here worth surfacing to the angler.
+    // system of record, so there's nothing here worth surfacing to the angler
+    // long-term (hence showPgDebug being temporary, not a permanent UI element).
     console.warn('[Postgres dual-write] ' + path + ' unreachable (offline or not on the tailnet?):', err);
+    showPgDebug('ONÅBAR: ' + path + '\n' + (err && err.message ? err.message : String(err)));
   }
 }
 
