@@ -1059,7 +1059,6 @@ async function runPgIsolationTest(){
     alert('PG-ISOLATIONSTEST\nFETCH KASTADE FEL (nådde aldrig servern):\n' + (err && err.message ? err.message : String(err)));
   }
 }
-document.getElementById('btnPgTest').addEventListener('click', runPgIsolationTest);
 
 async function performExport(){
   const btn = document.getElementById('btnExport');
