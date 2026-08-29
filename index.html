@@ -293,6 +293,23 @@ const CONFIG_KEY = 'pelagio_config_v1';
 // plain "open the sheet" shortcut in ⚙ Settings.
 const GOOGLE_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1H57ZQdEoXSZSuZT8Mpin6waAGjw4ZA4CJ_wdXETjoPY/edit';
 
+// ---------- Postgres dual-write (beta) ----------
+// Alongside the Sheet export above, also POST straight to Postgres via
+// PostgREST, over Tailscale — the server side (Homelab project,
+// C:\Claude-projects\Homelab\) is built and verified; see CLAUDE.md
+// "Related project: the Homelab server" for the full backstory. This is a
+// parallel-run beta: the Sheet stays the system of record, this write is
+// purely best-effort (see postgresWrite() below) and never blocks or fails
+// the Sheet export if it errors. Requires the phone to be joined to the
+// same Tailscale network as the server — a real rollout step per angler,
+// not just this code change.
+const PG_BASE_URL = 'http://100.76.129.29:3000';
+// Static, non-expiring JWT for the insert-only `fishing_writer` Postgres role
+// (no SELECT/UPDATE/DELETE anywhere — worst case if this leaks from the
+// public app JS is junk rows, nothing worse). Safe to embed here by design;
+// see Homelab's README.md "Fishing data" section.
+const PG_JWT = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiZmlzaGluZ193cml0ZXIifQ.8_-vHkhjxUPn5uPeyOfGVfNj_2cwROWUSA7IZ3Wltyc';
+
 // ---------- State ----------
 let catchLog = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
 // New fishing spots proposed from the app — held here until the next Exportera,
@@ -899,6 +916,85 @@ document.getElementById('btnExport').addEventListener('click', ()=>{
   });
 });
 
+// Field-name renames only — Postgres's fishing.catches columns match
+// FIELD_TO_HEADER's keys (Code.gs) exactly except these three, renamed for
+// unit clarity when the schema was built. No "source" key here — the
+// Postgres side defaults that to 'app' automatically. Keep in sync if
+// either side's field list ever changes (see CLAUDE.md).
+function toPostgresCatch(c){
+  return {
+    datum: c.datum, tid: c.tid, manad: c.manad, fiskare: c.fiskare,
+    plats_id: c.plats, vattentemp: c.vattentemp, vindriktning: c.vindriktning,
+    lufttryck: c.lufttryck, lufttryckstrend: c.lufttryckstrend,
+    art: c.art, storlek: c.storlek, vikt_g: c.vikt, langd_cm: c.langd,
+    drag: c.drag
+  };
+}
+
+// fishing.platser stores latitude/longitude as real NUMERIC columns, parsed
+// out of this app's single free-text "Google coordinates" field. Same
+// gotcha documented in CLAUDE.md's recurring gotchas: values use Swedish
+// comma-decimal AND the comma also separates lat from long, so split on
+// ", " (comma+space) — never a bare ",", or every number splits in half.
+function parseCoordinates(raw){
+  if(!raw) return { latitude: null, longitude: null };
+  const parts = raw.split(', ');
+  if(parts.length !== 2) return { latitude: null, longitude: null };
+  const lat = parseFloat(parts[0].replace(',', '.'));
+  const lng = parseFloat(parts[1].replace(',', '.'));
+  return {
+    latitude: Number.isNaN(lat) ? null : lat,
+    longitude: Number.isNaN(lng) ? null : lng
+  };
+}
+
+function toPostgresPlats(p){
+  const { latitude, longitude } = parseCoordinates(p.coordinates);
+  return {
+    plats_id: p.platsId, latitude, longitude, raw_coordinates: p.coordinates,
+    zon: p.zon, djup_m: p.djup, bottentyp: p.bottentyp, notering: p.notering
+  };
+}
+
+// One bulk-insert POST to a PostgREST endpoint. Best-effort and self-
+// contained: NEVER throws, so a caller can fire this without awaiting it
+// and it can never affect the Sheet export's own success/failure path —
+// same "wrapped, silently best-effort" philosophy Code.gs already uses for
+// appendToIndexListorPlatsList's convenience sync. Does distinguish, via
+// console.warn, "couldn't reach the server at all" (offline/not on the
+// tailnet/server down — expected during rollout, nothing to act on) from
+// "server rejected this data" (a real signal: a FK/CHECK constraint failed,
+// meaning this app's value lists and the fishing schema's reference data
+// have drifted apart — see Homelab's README.md "Fishing data" section).
+async function postgresWrite(path, rowsArr){
+  if(!rowsArr.length) return;
+  try{
+    const res = await fetch(PG_BASE_URL + path, {
+      method: 'POST',
+      headers: {
+        'Content-Profile': 'fishing',
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + PG_JWT
+        // Deliberately NO "Prefer: return=representation" here — the
+        // fishing_writer role has no SELECT at all, and PostgREST's
+        // INSERT...RETURNING needs SELECT even for your own just-inserted
+        // row. A plain 201 with an empty body is success. See Homelab's
+        // LEARNING_LOG.md (search "write path") for the full story.
+      },
+      body: JSON.stringify(rowsArr)
+    });
+    if(!res.ok){
+      const body = await res.text().catch(()=>'');
+      console.warn('[Postgres dual-write] ' + path + ' rejected (' + res.status + '): ' + body);
+    }
+  } catch(err){
+    // Unreachable — offline, phone not on the tailnet yet, server down.
+    // Expected during the beta rollout; the Sheet export is still the
+    // system of record, so there's nothing here worth surfacing to the angler.
+    console.warn('[Postgres dual-write] ' + path + ' unreachable (offline or not on the tailnet?):', err);
+  }
+}
+
 async function performExport(){
   const btn = document.getElementById('btnExport');
   btn.disabled = true;
@@ -914,6 +1010,12 @@ async function performExport(){
     platsId: p.platsId, coordinates: p.coordinates, zon: p.zon,
     djup: p.djup, bottentyp: p.bottentyp, notering: p.notering
   }));
+
+  // Dual-write beta: fired in parallel, never awaited as part of the Sheet
+  // export's own success/failure path below — postgresWrite() never throws,
+  // so this can't delay or break the Sheet write even on total failure.
+  postgresWrite('/catches', rows.map(toPostgresCatch));
+  postgresWrite('/platser', platser.map(toPostgresPlats));
 
   try{
     const res = await fetch(config.webAppUrl, {
