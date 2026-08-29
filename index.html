@@ -211,6 +211,12 @@
   <button class="btn btn-settings" id="btnStats">📊</button>
   <button class="btn btn-export" id="btnExport">Exportera</button>
   <button class="btn btn-settings" id="btnSettings">⚙</button>
+  <!-- TEMPORARY DEBUG (2026-08-29): isolates the raw Postgres fetch from
+       everything else (Sheet export, Promise.allSettled timing, the
+       showPgDebug banner's own rendering) — see fiske-clicker.html's
+       runPgIsolationTest() for what this actually does. REMOVE once the
+       dual-write root cause is confirmed fixed. -->
+  <button class="btn btn-settings" id="btnPgTest" style="background:#ff6b35;color:#1a0800;font-weight:700;">🔧PG</button>
 </footer>
 
 <script>
@@ -1019,6 +1025,39 @@ async function postgresWrite(path, rowsArr){
     showPgDebug('ONÅBAR: ' + path + '\n' + (err && err.message ? err.message : String(err)));
   }
 }
+
+// TEMPORARY DEBUG (added 2026-08-29 at Homelab's request): isolates the raw
+// Postgres fetch from EVERYTHING else — the Sheet export, the
+// Promise.allSettled timing fix, even showPgDebug()'s own rendering code
+// (which could in principle have its own bug independent of the actual
+// write). A single, fully-awaited fetch with one minimal hardcoded valid
+// row, result shown via plain alert() — no custom UI to doubt.
+// REMOVE once the dual-write root cause is confirmed fixed.
+async function runPgIsolationTest(){
+  const testRow = {
+    datum: todayISO(), tid: currentTime(), manad: currentManad(),
+    fiskare: 'Kecke', plats_id: 'Havsbadet', vattentemp: '15 – 18°C',
+    vindriktning: 'Ospecificerad', lufttryck: 'Ospecificerad',
+    lufttryckstrend: 'Ospecificerat', art: 'Abborre', storlek: 'Mellan',
+    vikt_g: null, langd_cm: null, drag: 'Sked'
+  };
+  try{
+    const res = await fetch(PG_BASE_URL + '/catches', {
+      method: 'POST',
+      headers: {
+        'Content-Profile': 'fishing',
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + PG_JWT
+      },
+      body: JSON.stringify([testRow])
+    });
+    const body = await res.text().catch(()=>'(kunde inte läsa svarstext)');
+    alert('PG-ISOLATIONSTEST\nStatus: ' + res.status + '\nSvar: ' + (body || '(tomt — normalt vid 201)'));
+  } catch(err){
+    alert('PG-ISOLATIONSTEST\nFETCH KASTADE FEL (nådde aldrig servern):\n' + (err && err.message ? err.message : String(err)));
+  }
+}
+document.getElementById('btnPgTest').addEventListener('click', runPgIsolationTest);
 
 async function performExport(){
   const btn = document.getElementById('btnExport');
