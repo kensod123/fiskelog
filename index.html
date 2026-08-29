@@ -1036,11 +1036,23 @@ async function performExport(){
     djup: p.djup, bottentyp: p.bottentyp, notering: p.notering
   }));
 
-  // Dual-write beta: fired in parallel, never awaited as part of the Sheet
-  // export's own success/failure path below — postgresWrite() never throws,
-  // so this can't delay or break the Sheet write even on total failure.
-  postgresWrite('/catches', rows.map(toPostgresCatch));
-  postgresWrite('/platser', platser.map(toPostgresPlats));
+  // Dual-write beta: fired without awaiting here, so they can't delay or
+  // block the Sheet export's own success/failure path below — postgresWrite()
+  // never throws either way. BUT the two promises are kept and awaited
+  // together near the end of this function (see Promise.allSettled below) —
+  // otherwise, on a real phone, the browser can abandon an unawaited
+  // in-flight fetch() the moment the page backgrounds/reloads/navigates
+  // right after "Klart!" appears, silently killing the request before it
+  // ever reaches either postgresWrite()'s success path or its own
+  // catch/!res.ok branches. Diagnosed by Homelab 2026-08-29 after a real
+  // catch showed neither a debug banner nor a landed row — see README
+  // changelog for the full story. Awaiting at the end keeps this async
+  // function's execution (and therefore the fetches) alive until they
+  // actually finish, without ever delaying the Klart! message itself.
+  const pgWrites = [
+    postgresWrite('/catches', rows.map(toPostgresCatch)),
+    postgresWrite('/platser', platser.map(toPostgresPlats))
+  ];
 
   try{
     const res = await fetch(config.webAppUrl, {
@@ -1063,6 +1075,10 @@ async function performExport(){
     btn.textContent = 'Ingen anslutning — försök igen senare';
   }
   setTimeout(()=>{ btn.textContent='Exportera'; btn.disabled = (catchLog.length===0 && pendingPlatser.length===0); }, 2500);
+
+  // See the comment above pgWrites — this is what actually keeps the two
+  // dual-write fetches alive long enough to complete on a real device.
+  await Promise.allSettled(pgWrites);
 }
 
 // ---------- Live Plats sync ----------
