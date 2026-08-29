@@ -303,7 +303,7 @@ const GOOGLE_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1H57ZQdEoXSZSuZ
 // the Sheet export if it errors. Requires the phone to be joined to the
 // same Tailscale network as the server — a real rollout step per angler,
 // not just this code change.
-const PG_BASE_URL = 'http://100.76.129.29:3000';
+const PG_BASE_URL = 'https://homeserver.tailffb774.ts.net';
 // Static, non-expiring JWT for the insert-only `fishing_writer` Postgres role
 // (no SELECT/UPDATE/DELETE anywhere — worst case if this leaks from the
 // public app JS is junk rows, nothing worse). Safe to embed here by design;
