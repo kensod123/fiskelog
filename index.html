@@ -308,7 +308,7 @@ const PG_BASE_URL = 'https://homeserver.tailffb774.ts.net';
 // (no SELECT/UPDATE/DELETE anywhere — worst case if this leaks from the
 // public app JS is junk rows, nothing worse). Safe to embed here by design;
 // see Homelab's README.md "Fishing data" section.
-const PG_JWT = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjogImZpc2hpbmdfd3JpdGVyIn0.N8O1BoPUvsv-3WIuNbZVC2UgwceZ7E02e9282hOb2O8';
+const PG_JWT = 'eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJyb2xlIjogImZpc2hpbmdfd3JpdGVyIiwgImVtYWlsIjogImtlbnNvZDEyM0BnbWFpbC5jb20ifQ.w20jRsgLHLKiKnMbJk9XFyMWvtWQWRzYX8vzMdtZfNs';
 
 // ---------- State ----------
 let catchLog = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
@@ -1076,6 +1076,20 @@ async function performExport(){
     djup: p.djup, bottentyp: p.bottentyp, notering: p.notering
   }));
 
+  // TEMPORARY GATE (2026-08-30): the server now overwrites `fiskare` with
+  // the identity tied to the writing token's email — a real per-user
+  // login/registration system (fishing-users-auth.sql) is being rolled
+  // out, but only Kecke has his own personal token so far. Until everyone
+  // has their own, sending anyone else's catches would silently
+  // misattribute them all to Kecke in Postgres. So: only catches actually
+  // logged as Kecke go to Postgres for now — filtered per-row (not a
+  // blanket skip) since session.fiskare can change mid-export if someone
+  // switched the Fiskare selector partway through a session. Everyone's
+  // catches still export to the Sheet exactly as before, completely
+  // unaffected — this only gates the Postgres beta leg.
+  // REMOVE this filter once every angler has their own personal token.
+  const rowsForPostgres = rows.filter(c => c.fiskare === 'Kecke');
+
   // Dual-write beta: fired without awaiting here, so they can't delay or
   // block the Sheet export's own success/failure path below — postgresWrite()
   // never throws either way. BUT the two promises are kept and awaited
@@ -1090,7 +1104,7 @@ async function performExport(){
   // function's execution (and therefore the fetches) alive until they
   // actually finish, without ever delaying the Klart! message itself.
   const pgWrites = [
-    postgresWrite('/catches', rows.map(toPostgresCatch)),
+    postgresWrite('/catches', rowsForPostgres.map(toPostgresCatch)),
     postgresWrite('/platser', platser.map(toPostgresPlats))
   ];
 
